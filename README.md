@@ -11,8 +11,6 @@
 
 Fotser, modern ve kullanıcı dostu bir fotoğraf albümü yönetim sistemidir. Hiyerarşik albüm yapısı ve kolay kurulum sihirbazı ile fotoğraflarınızı düzenli bir şekilde yönetmenizi sağlar.
 
-![Fotser Screenshot](screenshot.png)
-
 ## ✨ Özellikler
 
 - **Hiyerarşik Albüm Yapısı**: Ana ve alt albümler oluşturarak fotoğraflarınızı organize edin
