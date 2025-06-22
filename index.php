@@ -143,6 +143,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             break;
+            
+        case 'clear_cache':
+            // Önbellek temizleme işlemi
+            $target = $_POST['cache_target'] ?? 'all';
+            
+            if ($target === 'all') {
+                // Tüm önbelleği temizle
+                clearCache(UPLOAD_PATH);
+                setToast('Tüm fotoğraf önbellekleri başarıyla temizlendi.', 'success');
+            } elseif ($target === 'current_album' && $currentAlbumId) {
+                // Mevcut albümün önbelleğini temizle
+                $currentAlbum = $album->getById($currentAlbumId);
+                if ($currentAlbum) {
+                    $albumPath = UPLOAD_PATH . '/' . $currentAlbum['path'];
+                    clearCache($albumPath);
+                    setToast('Bu albümün önbelleği başarıyla temizlendi.', 'success');
+                } else {
+                    setToast('Albüm bulunamadı.', 'error');
+                }
+            }
+            
+            redirect($_SERVER['REQUEST_URI']);
+            break;
 
         case 'bulk_delete':
             $selectedItems = $_POST['selected_items'] ?? '';
@@ -524,6 +547,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <li><a class="dropdown-item" href="#" id="bulkRenameBtn">
                             <i class="fas fa-edit me-2"></i>Toplu Adlandır
                         </a></li>
+                        <?php endif; ?>
+                    </ul>
+                </div>
+                
+                <!-- Önbellek Temizleme Butonu -->
+                <div class="btn-group me-2" role="group">
+                    <button type="button" class="btn btn-outline-info" data-bs-toggle="dropdown">
+                        <i class="fas fa-broom"></i> Önbellek
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <form method="POST" class="px-2 py-1">
+                                <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                                <input type="hidden" name="action" value="clear_cache">
+                                <input type="hidden" name="cache_target" value="all">
+                                <button type="submit" class="dropdown-item">
+                                    <i class="fas fa-trash-alt me-2"></i>Tüm Önbelleği Temizle
+                                </button>
+                            </form>
+                        </li>
+                        <?php if ($currentAlbumId): ?>
+                        <li>
+                            <form method="POST" class="px-2 py-1">
+                                <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+                                <input type="hidden" name="action" value="clear_cache">
+                                <input type="hidden" name="cache_target" value="current_album">
+                                <button type="submit" class="dropdown-item">
+                                    <i class="fas fa-broom me-2"></i>Bu Albümün Önbelleğini Temizle
+                                </button>
+                            </form>
+                        </li>
                         <?php endif; ?>
                     </ul>
                 </div>
@@ -1470,6 +1524,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 dropArea.addEventListener('drop', function(e) {
                     const dt = e.dataTransfer;
                     const files = dt.files;
+                    
+                    // Dosyaları fileInput'a aktar (böylece yükleme butonu çalışacak)
+                    const dataTransfer = new DataTransfer();
+                    Array.from(files).forEach(file => {
+                        dataTransfer.items.add(file);
+                    });
+                    fileInput.files = dataTransfer.files;
+                    
+                    // Dosyaları görüntüle
                     handleFiles(files);
                 });
                 

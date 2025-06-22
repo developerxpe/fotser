@@ -291,4 +291,45 @@ function requireLogin(): void {
     global $auth;
     $auth->requireLogin();
 }
+
+/**
+ * Önbelleği temizle
+ * @param string|null $path Belirli bir klasör/dosya yolu (null ise tüm önbellek temizlenir)
+ * @return bool Temizleme işlemi başarılı oldu mu?
+ */
+function clearCache(?string $path = null): bool {
+    // Tarayıcı önbelleğini temizlemek için HTTP başlıkları
+    header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+    header("Cache-Control: post-check=0, pre-check=0", false);
+    header("Pragma: no-cache");
+    
+    // Belirli bir dosya veya klasör için önbellek temizleme
+    if ($path !== null && file_exists($path)) {
+        // Dosya ise
+        if (is_file($path)) {
+            // Dosyanın son değiştirilme zamanını güncelle
+            return touch($path);
+        } 
+        // Klasör ise
+        else if (is_dir($path)) {
+            // Klasördeki tüm dosyaların son değiştirilme zamanını güncelle
+            $success = true;
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($path),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+            
+            foreach ($iterator as $item) {
+                if ($item->isFile()) {
+                    if (!touch($item->getPathname())) {
+                        $success = false;
+                    }
+                }
+            }
+            return $success;
+        }
+    }
+    
+    return true;
+}
 ?> 

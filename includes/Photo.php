@@ -63,6 +63,10 @@ class Photo {
         $sql = "INSERT INTO photos (album_id, filename, original_name, file_size, width, height, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, NOW())";
         $result = $this->db->insert($sql, [$albumId, $fileName, $updatedOriginalName, $fileSize, $width, $height]);
         
+        // Önbelleği temizle
+        clearCache($filePath);
+        clearCache($albumPath);
+        
         return $result !== null;
     }
 
@@ -144,7 +148,12 @@ class Photo {
         if ($albumData) {
             // Fiziksel dosyayı sil
             $filePath = UPLOAD_PATH . '/' . $albumData['path'] . '/' . $photo['filename'];
+            $albumPath = UPLOAD_PATH . '/' . $albumData['path'];
+            
             if (file_exists($filePath)) {
+                // Dosyayı silmeden önce önbelleği temizle
+                clearCache($filePath);
+                clearCache($albumPath);
                 unlink($filePath);
             }
         }
@@ -226,9 +235,16 @@ class Photo {
         
         // Dosyayı yeniden adlandır
         if (file_exists($oldFilePath) && $oldFilePath !== $newFilePath) {
+            // Dosyayı yeniden adlandırmadan önce önbelleği temizle
+            clearCache($oldFilePath);
+            
             if (!rename($oldFilePath, $newFilePath)) {
                 return ['success' => false, 'message' => 'Dosya yeniden adlandırılamadı.'];
             }
+            
+            // Yeni dosya için önbelleği temizle
+            clearCache($newFilePath);
+            clearCache($albumPath);
         }
         
         // Veritabanını güncelle
@@ -252,52 +268,70 @@ class Photo {
             if (!$photo) {
                 return ['success' => false, 'message' => 'Fotoğraf bulunamadı.'];
             }
-
+            
+            // Hedef albüm kontrolü
             $album = new Album($this->db);
             $targetAlbum = $album->getById($targetAlbumId);
             if (!$targetAlbum) {
                 return ['success' => false, 'message' => 'Hedef albüm bulunamadı.'];
             }
-
+            
+            // Kaynak albüm kontrolü
+            $sourceAlbum = $album->getById($photo['album_id']);
+            if (!$sourceAlbum) {
+                return ['success' => false, 'message' => 'Kaynak albüm bulunamadı.'];
+            }
+            
+            // Aynı albüme taşıma kontrolü
+            if ($photo['album_id'] == $targetAlbumId) {
+                return ['success' => false, 'message' => 'Fotoğraf zaten bu albümde.'];
+            }
+            
+            // Kaynak ve hedef dosya yolları
+            $sourceAlbumPath = UPLOAD_PATH . '/' . $sourceAlbum['path'];
+            $targetAlbumPath = UPLOAD_PATH . '/' . $targetAlbum['path'];
+            $sourceFilePath = $sourceAlbumPath . '/' . $photo['filename'];
+            
+            // Hedef albümde aynı isimde dosya var mı kontrol et
+            $newFileName = $this->makeUniqueFileName($photo['filename'], $targetAlbumId);
+            $targetFilePath = $targetAlbumPath . '/' . $newFileName;
+            
+            // Hedef klasörü oluştur (yoksa)
+            if (!is_dir($targetAlbumPath)) {
+                if (!mkdir($targetAlbumPath, 0755, true)) {
+                    return ['success' => false, 'message' => 'Hedef klasör oluşturulamadı.'];
+                }
+            }
+            
             // Dosyayı taşı
-            $oldPath = UPLOAD_PATH . '/' . $photo['album_path'] . '/' . $photo['filename'];
-            $newPath = UPLOAD_PATH . '/' . $targetAlbum['path'] . '/' . $photo['filename'];
-
-            // Hedef dizini oluştur
-            $targetDir = UPLOAD_PATH . '/' . $targetAlbum['path'] . '/';
-            if (!is_dir($targetDir)) {
-                mkdir($targetDir, 0755, true);
-            }
-
-            // Dosya adı çakışması kontrolü
-            if (file_exists($newPath)) {
-                $filename = $this->generateUniqueFilename($photo['filename'], $targetAlbum['path']);
-                $newPath = UPLOAD_PATH . '/' . $targetAlbum['path'] . '/' . $filename;
+            if (file_exists($sourceFilePath)) {
+                // Dosyayı taşımadan önce önbelleği temizle
+                clearCache($sourceFilePath);
                 
-                // Veritabanında dosya adını ve original_name'i güncelle
-                $updatedOriginalName = pathinfo($filename, PATHINFO_FILENAME) . '.' . pathinfo($photo['original_name'], PATHINFO_EXTENSION);
-                $this->db->execute(
-                    "UPDATE photos SET filename = ?, original_name = ? WHERE id = ?",
-                    [$filename, $updatedOriginalName, $photoId]
-                );
+                if (!copy($sourceFilePath, $targetFilePath)) {
+                    return ['success' => false, 'message' => 'Dosya taşınamadı.'];
+                }
+                
+                // Kaynak dosyayı sil
+                unlink($sourceFilePath);
+                
+                // Yeni dosya için önbelleği temizle
+                clearCache($targetFilePath);
+                clearCache($sourceAlbumPath);
+                clearCache($targetAlbumPath);
             }
-
-            if (file_exists($oldPath)) {
-                rename($oldPath, $newPath);
-            }
-
+            
             // Veritabanını güncelle
-            $this->db->execute(
-                "UPDATE photos SET album_id = ? WHERE id = ?",
-                [$targetAlbumId, $photoId]
-            );
-
-            return [
-                'success' => true,
-                'message' => 'Fotoğraf başarıyla taşındı.'
-            ];
+            $sql = "UPDATE photos SET album_id = ?, filename = ? WHERE id = ?";
+            $result = $this->db->execute($sql, [$targetAlbumId, $newFileName, $photoId]);
+            
+            if ($result) {
+                return ['success' => true, 'message' => 'Fotoğraf başarıyla taşındı.'];
+            }
+            
+            return ['success' => false, 'message' => 'Fotoğraf taşınamadı.'];
         } catch (Exception $e) {
-            return ['success' => false, 'message' => 'Fotoğraf taşınırken bir hata oluştu: ' . $e->getMessage()];
+            return ['success' => false, 'message' => 'Hata: ' . $e->getMessage()];
         }
     }
 
@@ -353,7 +387,8 @@ class Photo {
     }
 
     public function getPhotoUrl(array $photo): string {
-        return 'uploads/' . $photo['album_path'] . '/' . $photo['filename'];
+        $albumPath = $photo['album_path'] ?? '';
+        return 'uploads/' . $albumPath . '/' . $photo['filename'] . '?v=' . time();
     }
 
     private function sanitizeFileName(string $fileName): string {
