@@ -719,4 +719,97 @@ body {
 
 .submenu.dropdown-menu {
     z-index: 1070 !important;
+}
+
+/* === UPLOAD AREA STYLES === */
+.upload-area {
+    border: 2px dashed #ccc;
+    border-radius: var(--border-radius);
+    background-color: #f8f9fa;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.upload-area:hover {
+    border-color: var(--primary-color);
+    background-color: #e9f2ff;
+}
+
+.upload-area.dragover {
+    border-color: var(--primary-color);
+    background-color: #e9f2ff;
+    box-shadow: 0 0 10px rgba(0, 123, 255, 0.3);
+}
+
+.upload-area p {
+    margin-bottom: 1rem;
+    color: #6c757d;
+}
+
+/* Dosya listesi stilleri */
+#fileList .list-group-item,
+#uploadedFileList .list-group-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.file-item-name {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 10px;
+}
+
+.file-item-size {
+    color: #6c757d;
+    font-size: 0.875rem;
+    white-space: nowrap;
+}
+
+.file-item-status {
+    margin-left: 10px;
+    white-space: nowrap;
+}
+
+.file-item-success {
+    color: var(--success-color);
+}
+
+.file-item-error {
+    color: var(--danger-color);
+}
+
+.file-item-pending {
+    color: var(--warning-color);
+}
+
+.file-item-uploading {
+    color: var(--info-color);
+}
+
+.file-item-remove {
+    cursor: pointer;
+    color: var(--danger-color);
+    margin-left: 10px;
+}
+
+.file-item-remove:hover {
+    color: #bd2130;
+}
+
+/* Progress bar stilleri */
+#uploadProgress {
+    margin-top: 20px;
+}
+
+#currentFileInfo {
+    margin-top: 5px;
+    margin-bottom: 10px;
 } 

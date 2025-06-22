@@ -70,6 +70,7 @@ class Photo {
         $successCount = 0;
         $errorCount = 0;
         $errors = [];
+        $uploadedFiles = [];
 
         if (empty($files['name'][0])) {
             return ['success' => false, 'message' => 'Hiç dosya seçilmedi.'];
@@ -90,22 +91,45 @@ class Photo {
                 
                 if ($result) {
                     $successCount++;
+                    // Başarılı yüklenen dosya bilgilerini ekle
+                    $uploadedFiles[] = [
+                        'name' => $files['name'][$i],
+                        'size' => $files['size'][$i],
+                        'status' => 'success'
+                    ];
                 } else {
                     $errorCount++;
+                    $errors[] = $files['name'][$i] . ': Yükleme başarısız.';
+                    $uploadedFiles[] = [
+                        'name' => $files['name'][$i],
+                        'size' => $files['size'][$i],
+                        'status' => 'error',
+                        'message' => 'Yükleme başarısız.'
+                    ];
                 }
             } catch (Exception $e) {
                 $errorCount++;
                 $errors[] = $files['name'][$i] . ': ' . $e->getMessage();
+                $uploadedFiles[] = [
+                    'name' => $files['name'][$i],
+                    'size' => $files['size'][$i],
+                    'status' => 'error',
+                    'message' => $e->getMessage()
+                ];
             }
         }
 
-        if ($successCount > 0 && $errorCount === 0) {
-            return ['success' => true, 'message' => "$successCount fotoğraf başarıyla yüklendi."];
-        } elseif ($successCount > 0) {
-            return ['success' => true, 'message' => "$successCount fotoğraf yüklendi, $errorCount hata oluştu."];
-        } else {
-            return ['success' => false, 'message' => 'Hiç fotoğraf yüklenemedi.' . (!empty($errors) ? ' Hatalar: ' . implode(', ', $errors) : '')];
-        }
+        $response = [
+            'success' => $successCount > 0,
+            'message' => $successCount > 0 ? 
+                ($errorCount > 0 ? "$successCount fotoğraf yüklendi, $errorCount hata oluştu." : "$successCount fotoğraf başarıyla yüklendi.") : 
+                'Hiç fotoğraf yüklenemedi.' . (!empty($errors) ? ' Hatalar: ' . implode(', ', $errors) : ''),
+            'success_count' => $successCount,
+            'error_count' => $errorCount,
+            'files' => $uploadedFiles
+        ];
+
+        return $response;
     }
 
     public function delete(int $id): array {

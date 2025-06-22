@@ -46,6 +46,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect();
     }
 
+    // AJAX isteği kontrolü
+    $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest';
+
     switch ($action) {
         case 'create_album':
             $albumName = trim($_POST['album_name'] ?? '');
@@ -127,8 +130,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         case 'upload_photos':
             if ($currentAlbumId && isset($_FILES['photos'])) {
                 $result = $photo->uploadMultiple($_FILES['photos'], $currentAlbumId);
-                setToast($result['message'], $result['success'] ? 'success' : 'error');
-                redirect($_SERVER['REQUEST_URI']);
+                
+                // AJAX isteği ise JSON yanıt döndür
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode($result);
+                    exit;
+                } else {
+                    // Normal form gönderimi ise toast mesajı göster ve yönlendir
+                    setToast($result['message'], $result['success'] ? 'success' : 'error');
+                    redirect($_SERVER['REQUEST_URI']);
+                }
             }
             break;
 
@@ -932,7 +944,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="modal fade" id="uploadPhotosModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <form method="POST" enctype="multipart/form-data">
+                <form method="POST" enctype="multipart/form-data" id="uploadForm">
                     <div class="modal-header">
                         <h5 class="modal-title"><i class="fas fa-upload me-2"></i>Fotoğraf Yükle</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -942,17 +954,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <input type="hidden" name="action" value="upload_photos">
                         
                         <div class="mb-3">
-                            <label for="photos" class="form-label">Fotoğrafları Seçin</label>
-                            <input type="file" class="form-control" id="photos" name="photos[]" 
-                                   multiple accept="image/*" required>
+                            <div class="upload-area p-4 border rounded text-center" id="dropArea">
+                                <i class="fas fa-cloud-upload-alt fa-3x mb-3 text-muted"></i>
+                                <p>Fotoğrafları buraya sürükleyip bırakın veya seçmek için tıklayın</p>
+                                <input type="file" class="form-control d-none" id="photos" name="photos[]" 
+                                       multiple accept="image/*" required>
+                                <button type="button" class="btn btn-outline-primary" id="selectFilesBtn">
+                                    <i class="fas fa-folder-open me-1"></i>Dosya Seç
+                                </button>
+                            </div>
                             <div class="form-text">
                                 Birden fazla fotoğraf seçebilirsiniz. Desteklenen formatlar: JPG, PNG, GIF, WebP
                             </div>
                         </div>
+                        
+                        <!-- Seçilen Dosyalar Listesi -->
+                        <div id="selectedFiles" class="mb-3 d-none">
+                            <h6><i class="fas fa-images me-2"></i>Seçilen Fotoğraflar (<span id="fileCount">0</span>)</h6>
+                            <div class="list-group" id="fileList"></div>
+                        </div>
+                        
+                        <!-- Yükleme İlerleme Durumu -->
+                        <div id="uploadProgress" class="d-none">
+                            <h6><i class="fas fa-spinner fa-spin me-2"></i>Yükleniyor...</h6>
+                            <div class="progress mb-2">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" style="width: 0%" id="totalProgressBar">0%</div>
+                            </div>
+                            <div id="currentFileInfo" class="small text-muted"></div>
+                            
+                            <!-- Yüklenen Dosyalar Listesi -->
+                            <div id="uploadedFiles" class="mt-3">
+                                <div class="list-group" id="uploadedFileList"></div>
+                            </div>
+                        </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
-                        <button type="submit" class="btn btn-success">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="cancelUploadBtn">İptal</button>
+                        <button type="submit" class="btn btn-success" id="uploadBtn">
                             <i class="fas fa-upload me-1"></i>Yükle
                         </button>
                     </div>
@@ -1157,212 +1196,551 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 });
             });
-        });
-    </script>
-    
-    <script>
-        // Albüm filtreleme fonksiyonu
-        document.addEventListener('DOMContentLoaded', function() {
-            const filterButtons = document.querySelectorAll('.btn-filter-album');
-            
-            filterButtons.forEach(button => {
-                button.addEventListener('click', function() {
-                    const albumId = this.getAttribute('data-album-id');
+
+            // Tümünü Seç butonu
+            const selectAllBtn = document.getElementById('selectAllBtn');
+            if (selectAllBtn) {
+                selectAllBtn.addEventListener('click', function() {
+                    const checkboxes = document.querySelectorAll('.item-checkbox');
+                    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
                     
-                    // Tüm butonların active sınıfını kaldır
-                    filterButtons.forEach(btn => {
-                        btn.classList.remove('btn-primary');
-                        btn.classList.add('btn-outline-secondary');
+                    checkboxes.forEach(checkbox => {
+                        checkbox.checked = !allChecked;
                     });
                     
-                    // Tıklanan butona active sınıfını ekle
-                    this.classList.remove('btn-outline-secondary');
-                    this.classList.add('btn-primary');
+                    // Toplu işlem butonlarını güncelle
+                    updateBulkActionButton();
+                });
+            }
+            
+            // Toplu Silme butonu
+            const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+            if (bulkDeleteBtn) {
+                bulkDeleteBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const modal = new bootstrap.Modal(document.getElementById('bulkDeleteModal'));
+                    modal.show();
+                });
+            }
+            
+            // Toplu Taşıma butonu
+            const bulkMoveBtn = document.getElementById('bulkMoveBtn');
+            if (bulkMoveBtn) {
+                bulkMoveBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const modal = new bootstrap.Modal(document.getElementById('bulkMoveModal'));
+                    modal.show();
+                });
+            }
+            
+            // Toplu Adlandırma butonu
+            const bulkRenameBtn = document.getElementById('bulkRenameBtn');
+            if (bulkRenameBtn) {
+                bulkRenameBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const modal = new bootstrap.Modal(document.getElementById('bulkRenameModal'));
+                    modal.show();
+                });
+            }
+            
+            // Albüm filtresi butonları
+            const filterButtons = document.querySelectorAll('.btn-filter-album');
+            if (filterButtons.length > 0) {
+                filterButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        const albumId = this.getAttribute('data-album-id');
+                        filterByAlbum(albumId);
+                        
+                        // Aktif butonu güncelle
+                        filterButtons.forEach(btn => btn.classList.remove('btn-primary'));
+                        filterButtons.forEach(btn => btn.classList.add('btn-outline-secondary'));
+                        this.classList.remove('btn-outline-secondary');
+                        this.classList.add('btn-primary');
+                    });
+                });
+            }
+            
+            // Öğe checkbox'ları
+            const itemCheckboxes = document.querySelectorAll('.item-checkbox');
+            if (itemCheckboxes.length > 0) {
+                itemCheckboxes.forEach(checkbox => {
+                    checkbox.addEventListener('change', function() {
+                        updateBulkActionButton();
+                    });
+                });
+            }
+            
+            // Toplu işlem butonunu güncelle
+            function updateBulkActionButton() {
+                const checkedItems = document.querySelectorAll('.item-checkbox:checked');
+                const bulkActionsBtn = document.getElementById('bulkActionsBtn');
+                
+                if (bulkActionsBtn) {
+                    bulkActionsBtn.disabled = checkedItems.length === 0;
                     
-                    // Albüm ve fotoğrafları filtrele
-                    if (albumId === 'all') {
-                        // Tüm albüm ve fotoğrafları göster
-                        document.querySelectorAll('.album-cards-container .col, .photo-cards-container .col').forEach(item => {
-                            item.style.display = '';
-                        });
-                    } else {
-                        // Sadece seçilen albüme ait öğeleri göster
-                        document.querySelectorAll('.album-cards-container .col').forEach(item => {
-                            const card = item.querySelector('.card');
-                            const cardAlbumId = card.getAttribute('data-album-id');
+                    // Toplu işlem modallarını güncelle
+                    const bulkDeleteItems = document.getElementById('bulkDeleteItems');
+                    const bulkMoveItems = document.getElementById('bulkMoveItems');
+                    const bulkRenameItems = document.getElementById('bulkRenameItems');
+                    
+                    const selectedItems = Array.from(checkedItems).map(cb => cb.value).join(',');
+                    
+                    if (bulkDeleteItems) bulkDeleteItems.value = selectedItems;
+                    if (bulkMoveItems) bulkMoveItems.value = selectedItems;
+                    if (bulkRenameItems) bulkRenameItems.value = selectedItems;
+                    
+                    // Modal içindeki sayıları güncelle
+                    const bulkDeleteCount = document.getElementById('bulkDeleteCount');
+                    const bulkMoveCount = document.getElementById('bulkMoveCount');
+                    
+                    if (bulkDeleteCount) bulkDeleteCount.textContent = checkedItems.length;
+                    if (bulkMoveCount) bulkMoveCount.textContent = checkedItems.length;
+                    
+                    // Toplu adlandırma için seçilen öğelerin adlarını textarea'ya ekle
+                    const bulkRenameList = document.getElementById('bulk_rename_list');
+                    if (bulkRenameList && checkedItems.length > 0) {
+                        const photoItems = Array.from(checkedItems).filter(cb => cb.dataset.type === 'photo');
+                        
+                        if (photoItems.length > 0) {
+                            const photoNames = photoItems.map(cb => {
+                                const photoCard = cb.closest('.photo-card-improved');
+                                if (photoCard) {
+                                    const photoName = photoCard.dataset.name;
+                                    // Uzantıyı kaldır
+                                    return photoName.replace(/\.[^/.]+$/, "");
+                                }
+                                return '';
+                            }).filter(name => name !== '');
                             
-                            if (cardAlbumId === albumId) {
-                                item.style.display = '';
-                            } else {
-                                item.style.display = 'none';
+                            bulkRenameList.value = photoNames.join('\n');
+                        }
+                    }
+                }
+            }
+            
+            // Albüme göre filtreleme
+            function filterByAlbum(albumId) {
+                const albumCards = document.querySelectorAll('.album-card-improved');
+                
+                if (albumId === 'all') {
+                    // Tüm albümleri göster
+                    albumCards.forEach(card => {
+                        const col = card.closest('.col');
+                        if (col) col.style.display = '';
+                    });
+                } else {
+                    // Seçilen albümü göster, diğerlerini gizle
+                    albumCards.forEach(card => {
+                        const col = card.closest('.col');
+                        if (!col) return;
+                        
+                        const cardAlbumId = card.getAttribute('data-album-id');
+                        col.style.display = (cardAlbumId === albumId) ? '' : 'none';
+                    });
+                }
+            }
+
+            // Sıralama seçeneğini hatırla
+            const sortOrder = document.getElementById('sortOrder');
+            if (sortOrder) {
+                // Kaydedilmiş sıralama seçeneğini yükle
+                const savedSortOrder = localStorage.getItem('fotser_sort_order');
+                if (savedSortOrder) {
+                    sortOrder.value = savedSortOrder;
+                }
+                
+                // Sıralama değiştiğinde kaydet
+                sortOrder.addEventListener('change', function() {
+                    localStorage.setItem('fotser_sort_order', this.value);
+                    applySorting();
+                });
+                
+                // Sayfa yüklendiğinde sıralamayı uygula
+                applySorting();
+            }
+            
+            // Sıralama işlemi
+            function applySorting() {
+                const sortValue = document.getElementById('sortOrder').value;
+                
+                // Albümleri sırala
+                const albumContainer = document.querySelector('.album-cards-container');
+                if (albumContainer) {
+                    const albums = Array.from(albumContainer.querySelectorAll('.col'));
+                    albums.sort((a, b) => {
+                        const aCard = a.querySelector('.album-card-improved');
+                        const bCard = b.querySelector('.album-card-improved');
+                        
+                        if (!aCard || !bCard) return 0;
+                        
+                        if (sortValue === 'name_asc') {
+                            return aCard.dataset.name.localeCompare(bCard.dataset.name);
+                        } else if (sortValue === 'name_desc') {
+                            return bCard.dataset.name.localeCompare(aCard.dataset.name);
+                        } else if (sortValue === 'date_desc') {
+                            return new Date(bCard.dataset.date) - new Date(aCard.dataset.date);
+                        } else if (sortValue === 'date_asc') {
+                            return new Date(aCard.dataset.date) - new Date(bCard.dataset.date);
+                        }
+                        return 0;
+                    });
+                    
+                    albums.forEach(album => albumContainer.appendChild(album));
+                }
+                
+                // Fotoğrafları sırala
+                const photoContainer = document.querySelector('.photo-cards-container');
+                if (photoContainer) {
+                    const photos = Array.from(photoContainer.querySelectorAll('.col'));
+                    photos.sort((a, b) => {
+                        const aCard = a.querySelector('.photo-card-improved');
+                        const bCard = b.querySelector('.photo-card-improved');
+                        
+                        if (!aCard || !bCard) return 0;
+                        
+                        if (sortValue === 'name_asc') {
+                            return aCard.dataset.name.localeCompare(bCard.dataset.name);
+                        } else if (sortValue === 'name_desc') {
+                            return bCard.dataset.name.localeCompare(aCard.dataset.name);
+                        } else if (sortValue === 'date_desc') {
+                            return new Date(bCard.dataset.date) - new Date(aCard.dataset.date);
+                        } else if (sortValue === 'date_asc') {
+                            return new Date(aCard.dataset.date) - new Date(bCard.dataset.date);
+                        }
+                        return 0;
+                    });
+                    
+                    photos.forEach(photo => photoContainer.appendChild(photo));
+                }
+            }
+            
+            // Fotoğraf yükleme işlemleri
+            const uploadForm = document.getElementById('uploadForm');
+            const dropArea = document.getElementById('dropArea');
+            const fileInput = document.getElementById('photos');
+            const selectFilesBtn = document.getElementById('selectFilesBtn');
+            const fileList = document.getElementById('fileList');
+            const selectedFiles = document.getElementById('selectedFiles');
+            const fileCount = document.getElementById('fileCount');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const cancelUploadBtn = document.getElementById('cancelUploadBtn');
+            const uploadProgress = document.getElementById('uploadProgress');
+            const totalProgressBar = document.getElementById('totalProgressBar');
+            const currentFileInfo = document.getElementById('currentFileInfo');
+            const uploadedFileList = document.getElementById('uploadedFileList');
+            
+            if (dropArea && fileInput) {
+                // Dosya seçme butonu
+                selectFilesBtn.addEventListener('click', function() {
+                    fileInput.click();
+                });
+                
+                // Dosya seçildiğinde
+                fileInput.addEventListener('change', function() {
+                    handleFiles(this.files);
+                });
+                
+                // Sürükle-bırak olayları
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                    dropArea.addEventListener(eventName, preventDefaults, false);
+                });
+                
+                function preventDefaults(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    dropArea.addEventListener(eventName, highlight, false);
+                });
+                
+                ['dragleave', 'drop'].forEach(eventName => {
+                    dropArea.addEventListener(eventName, unhighlight, false);
+                });
+                
+                function highlight() {
+                    dropArea.classList.add('dragover');
+                }
+                
+                function unhighlight() {
+                    dropArea.classList.remove('dragover');
+                }
+                
+                // Dosya bırakıldığında
+                dropArea.addEventListener('drop', function(e) {
+                    const dt = e.dataTransfer;
+                    const files = dt.files;
+                    handleFiles(files);
+                });
+                
+                // Seçilen dosyaları işle
+                function handleFiles(files) {
+                    if (files.length === 0) return;
+                    
+                    // Seçilen dosyaları göster
+                    selectedFiles.classList.remove('d-none');
+                    fileList.innerHTML = '';
+                    fileCount.textContent = files.length;
+                    
+                    Array.from(files).forEach((file, index) => {
+                        // Dosya türü kontrolü
+                        if (!file.type.match('image.*')) {
+                            return;
+                        }
+                        
+                        const listItem = document.createElement('div');
+                        listItem.className = 'list-group-item d-flex justify-content-between align-items-center';
+                        listItem.dataset.index = index;
+                        
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'file-item-name';
+                        nameSpan.textContent = file.name;
+                        
+                        const sizeSpan = document.createElement('span');
+                        sizeSpan.className = 'file-item-size';
+                        sizeSpan.textContent = formatFileSize(file.size);
+                        
+                        const removeBtn = document.createElement('span');
+                        removeBtn.className = 'file-item-remove';
+                        removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                        removeBtn.addEventListener('click', function() {
+                            listItem.remove();
+                            // Dosya sayısını güncelle
+                            fileCount.textContent = fileList.children.length;
+                            if (fileList.children.length === 0) {
+                                selectedFiles.classList.add('d-none');
                             }
                         });
-                    }
-                });
-            });
-        });
-    </script>
-    
-    <script>
-        // Arama ve Sıralama Fonksiyonları
-        document.addEventListener('DOMContentLoaded', function() {
-            const searchInput = document.getElementById('searchInput');
-            const sortOrder = document.getElementById('sortOrder');
-            const selectAllBtn = document.getElementById('selectAllBtn');
-            const bulkActionsBtn = document.getElementById('bulkActionsBtn');
-            
-            // Arama işlevi
-            function performSearch() {
-                const searchTerm = searchInput.value.toLowerCase().trim();
-                const cards = document.querySelectorAll('[data-searchable]');
-                
-                cards.forEach(card => {
-                    const searchableText = card.getAttribute('data-searchable');
-                    if (searchableText.includes(searchTerm)) {
-                        card.closest('.col').style.display = '';
-                    } else {
-                        card.closest('.col').style.display = 'none';
-                    }
-                });
-            }
-            
-            // Sıralama işlevi
-            function performSort() {
-                const sortValue = sortOrder.value;
-                const [criteria, direction] = sortValue.split('_');
-                
-                ['album', 'photo'].forEach(type => {
-                    const containerSelector = `.${type}-cards-container`;
-                    const container = document.querySelector(containerSelector);
-                    if (!container) return;
-                    
-                    // Tüm kartları seç
-                    const cards = Array.from(container.querySelectorAll('.col')).map(col => {
-                        const card = col.querySelector(`[data-type="${type}"]`);
-                        return {
-                            element: col,
-                            name: card.getAttribute('data-name') || '',
-                            date: card.getAttribute('data-date') || '',
-                            size: parseInt(card.getAttribute('data-size') || '0')
-                        };
-                    });
-                    
-                    // Sıralama işlemi
-                    cards.sort((a, b) => {
-                        let aValue, bValue;
                         
-                        switch(criteria) {
-                            case 'name':
-                                aValue = a.name.toLowerCase();
-                                bValue = b.name.toLowerCase();
-                                break;
-                            case 'date':
-                                aValue = new Date(a.date).getTime();
-                                bValue = new Date(b.date).getTime();
-                                break;
-                            case 'size':
-                                aValue = a.size;
-                                bValue = b.size;
-                                break;
-                            default:
-                                return 0;
-                        }
-                        
-                        if (direction === 'asc') {
-                            return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
-                        } else {
-                            return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
-                        }
+                        listItem.appendChild(nameSpan);
+                        listItem.appendChild(sizeSpan);
+                        listItem.appendChild(removeBtn);
+                        fileList.appendChild(listItem);
                     });
-                    
-                    // DOM'u güncelle
-                    cards.forEach(card => {
-                        container.appendChild(card.element);
-                    });
-                });
-            }
-            
-            // Toplu seçim işlevleri
-            function updateBulkActions() {
-                const checkedBoxes = document.querySelectorAll('.item-checkbox:checked');
-                const count = checkedBoxes.length;
-                
-                bulkActionsBtn.disabled = count === 0;
-                selectAllBtn.innerHTML = count > 0 ? 
-                    '<i class="fas fa-square"></i> Seçimi Temizle' : 
-                    '<i class="fas fa-check-square"></i> Tümünü Seç';
-            }
-            
-            // Event listeners
-            searchInput.addEventListener('input', performSearch);
-            sortOrder.addEventListener('change', performSort);
-            
-            selectAllBtn.addEventListener('click', function() {
-                const checkboxes = document.querySelectorAll('.item-checkbox');
-                const checkedCount = document.querySelectorAll('.item-checkbox:checked').length;
-                const shouldCheck = checkedCount === 0;
-                
-                checkboxes.forEach(cb => cb.checked = shouldCheck);
-                updateBulkActions();
-            });
-            
-            // Checkbox değişikliklerini dinle
-            document.addEventListener('change', function(e) {
-                if (e.target.classList.contains('item-checkbox')) {
-                    updateBulkActions();
-                }
-            });
-            
-            // Toplu işlem modal'ları
-            document.getElementById('bulkDeleteBtn').addEventListener('click', function() {
-                const checkedBoxes = document.querySelectorAll('.item-checkbox:checked');
-                const selectedItems = Array.from(checkedBoxes).map(cb => cb.value).join(',');
-                
-                document.getElementById('bulkDeleteItems').value = selectedItems;
-                document.getElementById('bulkDeleteCount').textContent = checkedBoxes.length;
-                
-                new bootstrap.Modal(document.getElementById('bulkDeleteModal')).show();
-            });
-            
-            document.getElementById('bulkMoveBtn').addEventListener('click', function() {
-                const checkedBoxes = document.querySelectorAll('.item-checkbox:checked');
-                const selectedItems = Array.from(checkedBoxes).map(cb => cb.value).join(',');
-                
-                document.getElementById('bulkMoveItems').value = selectedItems;
-                document.getElementById('bulkMoveCount').textContent = checkedBoxes.length;
-                
-                new bootstrap.Modal(document.getElementById('bulkMoveModal')).show();
-            });
-            
-            document.getElementById('bulkRenameBtn').addEventListener('click', function() {
-                const checkedBoxes = document.querySelectorAll('.item-checkbox:checked[data-type="photo"]');
-                if (checkedBoxes.length === 0) {
-                    alert('Lütfen en az bir fotoğraf seçin!');
-                    return;
                 }
                 
-                const selectedItems = Array.from(checkedBoxes);
-                const selectedValues = selectedItems.map(cb => cb.value).join(',');
+                // Dosya boyutunu formatla
+                function formatFileSize(bytes) {
+                    if (bytes === 0) return '0 Bytes';
+                    const k = 1024;
+                    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                }
                 
-                // Seçilen fotoğrafların isimlerini textarea'ya yerleştir
-                const currentNames = selectedItems.map(cb => {
-                    const card = cb.closest('[data-name]');
-                    const fileName = card.getAttribute('data-name');
-                    // Uzantısız dosya adını göster
-                    return fileName.substring(0, fileName.lastIndexOf('.'));
-                }).join('\n');
+                // Form gönderildiğinde
+                if (uploadForm) {
+                    uploadForm.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        
+                        // Seçilen dosya yoksa
+                        if (fileInput.files.length === 0) {
+                            alert('Lütfen en az bir fotoğraf seçin.');
+                            return;
+                        }
+                        
+                        // Yükleme arayüzünü göster
+                        uploadBtn.disabled = true;
+                        uploadProgress.classList.remove('d-none');
+                        selectedFiles.classList.add('d-none');
+                        dropArea.classList.add('d-none');
+                        uploadedFileList.innerHTML = '';
+                        
+                        // Her bir dosyayı ayrı ayrı yükle
+                        const files = fileInput.files;
+                        let totalUploaded = 0;
+                        const totalFiles = files.length;
+                        
+                        // İlerleme çubuğunu güncelle
+                        function updateProgressBar() {
+                            const percentComplete = Math.round((totalUploaded / totalFiles) * 100);
+                            totalProgressBar.style.width = percentComplete + '%';
+                            totalProgressBar.textContent = percentComplete + '%';
+                            currentFileInfo.textContent = `${totalUploaded}/${totalFiles} fotoğraf yüklendi`;
+                        }
+                        
+                        // Dosya yükleme işlemi
+                        function uploadFile(index) {
+                            if (index >= totalFiles) {
+                                // Tüm dosyalar yüklendi
+                                showToast(`${totalUploaded}/${totalFiles} fotoğraf başarıyla yüklendi.`, 'success');
+                                
+                                // 3 saniye sonra sayfayı yenile
+                                setTimeout(function() {
+                                    window.location.reload();
+                                }, 3000);
+                                return;
+                            }
+                            
+                            const file = files[index];
+                            const formData = new FormData();
+                            formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+                            formData.append('action', 'upload_photos');
+                            formData.append('photos[]', file);
+                            
+                            // Dosya bilgisini göster
+                            currentFileInfo.textContent = `Yükleniyor: ${file.name} (${index + 1}/${totalFiles})`;
+                            
+                            // Dosya listesine ekle
+                            const listItem = document.createElement('div');
+                            listItem.className = 'list-group-item d-flex justify-content-between align-items-center';
+                            listItem.dataset.index = index;
+                            
+                            const nameSpan = document.createElement('span');
+                            nameSpan.className = 'file-item-name';
+                            nameSpan.textContent = file.name;
+                            
+                            const sizeSpan = document.createElement('span');
+                            sizeSpan.className = 'file-item-size';
+                            sizeSpan.textContent = formatFileSize(file.size);
+                            
+                            const statusSpan = document.createElement('span');
+                            statusSpan.className = 'file-item-status file-item-uploading';
+                            statusSpan.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Yükleniyor...';
+                            
+                            listItem.appendChild(nameSpan);
+                            listItem.appendChild(sizeSpan);
+                            listItem.appendChild(statusSpan);
+                            uploadedFileList.appendChild(listItem);
+                            
+                            // AJAX ile yükle
+                            const xhr = new XMLHttpRequest();
+                            xhr.open('POST', window.location.href, true);
+                            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                            
+                            // Yükleme tamamlandığında
+                            xhr.onload = function() {
+                                if (xhr.status === 200) {
+                                    try {
+                                        const response = JSON.parse(xhr.responseText);
+                                        
+                                        // Başarı durumu
+                                        if (response.success) {
+                                            totalUploaded++;
+                                            updateProgressBar();
+                                            
+                                            // Dosya durumunu güncelle
+                                            statusSpan.className = 'file-item-status file-item-success';
+                                            statusSpan.innerHTML = '<i class="fas fa-check-circle"></i> Yüklendi';
+                                            
+                                            // Sonraki dosyayı yükle
+                                            uploadFile(index + 1);
+                                        } else {
+                                            // Hata durumu
+                                            statusSpan.className = 'file-item-status file-item-error';
+                                            statusSpan.innerHTML = '<i class="fas fa-times-circle"></i> Hata: ' + response.message;
+                                            
+                                            // Sonraki dosyayı yükle
+                                            uploadFile(index + 1);
+                                        }
+                                    } catch (e) {
+                                        // JSON parse hatası
+                                        statusSpan.className = 'file-item-status file-item-error';
+                                        statusSpan.innerHTML = '<i class="fas fa-times-circle"></i> Hata: JSON Parse Error';
+                                        
+                                        // Sonraki dosyayı yükle
+                                        uploadFile(index + 1);
+                                    }
+                                } else {
+                                    // HTTP hatası
+                                    statusSpan.className = 'file-item-status file-item-error';
+                                    statusSpan.innerHTML = '<i class="fas fa-times-circle"></i> Hata: ' + xhr.status;
+                                    
+                                    // Sonraki dosyayı yükle
+                                    uploadFile(index + 1);
+                                }
+                            };
+                            
+                            // Hata durumunda
+                            xhr.onerror = function() {
+                                statusSpan.className = 'file-item-status file-item-error';
+                                statusSpan.innerHTML = '<i class="fas fa-times-circle"></i> Bağlantı hatası';
+                                
+                                // Sonraki dosyayı yükle
+                                uploadFile(index + 1);
+                            };
+                            
+                            // İstek gönder
+                            xhr.send(formData);
+                        }
+                        
+                        // İlk dosyayı yüklemeye başla
+                        uploadFile(0);
+                        
+                        // İptal butonu
+                        cancelUploadBtn.addEventListener('click', function() {
+                            // Sayfayı yenile
+                            window.location.reload();
+                        });
+                    });
+                }
                 
-                document.getElementById('bulkRenameItems').value = selectedValues;
-                document.getElementById('bulk_rename_list').value = currentNames;
-                
-                new bootstrap.Modal(document.getElementById('bulkRenameModal')).show();
-            });
+                // Yükleme formunu sıfırla
+                function resetUploadForm() {
+                    uploadBtn.disabled = false;
+                    uploadProgress.classList.add('d-none');
+                    dropArea.classList.remove('d-none');
+                    fileInput.value = '';
+                    selectedFiles.classList.add('d-none');
+                    fileList.innerHTML = '';
+                    fileCount.textContent = '0';
+                }
+            }
             
-            // İlk yükleme
-            updateBulkActions();
-            
-            // Sayfa yüklendiğinde varsayılan sıralamayı uygula
-            performSort();
+            // Toast mesajı göster
+            function showToast(message, type) {
+                const toastContainer = document.querySelector('.toast-container');
+                if (!toastContainer) return;
+                
+                const toast = document.createElement('div');
+                toast.className = 'toast show';
+                toast.setAttribute('role', 'alert');
+                
+                const typeClass = type === 'success' ? 'success' : 
+                                 (type === 'error' ? 'danger' : 
+                                 (type === 'warning' ? 'warning' : 'info'));
+                
+                const icon = type === 'success' ? 'check-circle' : 
+                            (type === 'error' ? 'exclamation-circle' : 
+                            (type === 'warning' ? 'exclamation-triangle' : 'info-circle'));
+                
+                const title = type === 'success' ? 'Başarılı' : 
+                             (type === 'error' ? 'Hata' : 
+                             (type === 'warning' ? 'Uyarı' : 'Bilgi'));
+                
+                toast.innerHTML = `
+                    <div class="toast-header bg-${typeClass} text-white">
+                        <i class="fas fa-${icon} me-2"></i>
+                        <strong class="me-auto">${title}</strong>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                    </div>
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                `;
+                
+                toastContainer.appendChild(toast);
+                
+                // Toast'ı 5 saniye sonra kapat
+                setTimeout(function() {
+                    const bsToast = new bootstrap.Toast(toast);
+                    bsToast.hide();
+                    
+                    // Toast tamamen kapandıktan sonra DOM'dan kaldır
+                    toast.addEventListener('hidden.bs.toast', function() {
+                        toast.remove();
+                    });
+                }, 5000);
+                
+                // Kapatma butonuna tıklandığında
+                const closeBtn = toast.querySelector('.btn-close');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', function() {
+                        const bsToast = new bootstrap.Toast(toast);
+                        bsToast.hide();
+                    });
+                }
+            }
         });
     </script>
     
